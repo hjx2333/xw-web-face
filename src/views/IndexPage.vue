@@ -1,50 +1,42 @@
 <template>
   <div id="app">
-    <div v-show="showContainer" id="face-capture" class="face-capture">
-      <p class="tip">请保持人像在取景框内</p>
-
-      <video id="video" playsinline webkit-playsinline></video>
-
-      <canvas id="refCanvas"></canvas>
-
-      <!-- <img class="img-cover" src="@/assets/images/bg.png" alt="" /> -->
-      <p class="contentp">{{ scanTip }}</p>
+    <button @click="initClmtrackr">按钮</button>
+    <p class="tip">{{ title }}</p>
+    <div id="face-capture" class="face-capture">
+      <video id="video" width="200" height="200" preload="auto" loop playsinline autoplay>
+      </video>
+      <canvas id="refCanvas" width="200" height="200"></canvas>
     </div>
-
-    <div v-if="!showContainer" class="img-face">
-      <img class="imgurl" :src="imgUrl" />
-    </div>
+    <p class="tip">{{ scanTip }}</p>
   </div>
 </template>
 
 <script>
-import 'tracking/build/tracking-min'
-import 'tracking/build/data/face-min'
-import 'tracking/build/data/mouth-min'
-import 'tracking/build/data/eye-min'
-import 'tracking/examples/assets/color_camera_gui'
-import '@/assets/js/clmtrackr.min'
 export default {
   name: 'IndexPage',
   data() {
     return {
-      URL: null,
-      streamIns: null, // 视频流
-      showContainer: true, // 显示
-      tracker: null,
-      tipFlag: false, // 提示用户已经检测到
-      flag: false, // 判断是否已经拍照
-      context: null, // canvas上下文
-      profile: [], // 轮廓
-      removePhotoID: null, // 停止转换图片
-      scanTip: '人脸识别中...', // 提示文字
-      imgUrl: '',
-      canvas: null,
-      trackertask: null,
-      vwidth: '200',
-      vheight: '200',
-      userInfo: {},
-      orderData: {}
+      title: '请将头部对准摄像头', // 提示文字
+      scanTip: '',
+      trackingStarted: false,
+      ctrack: null,
+      status: false,
+
+      is_mouse_ok: false,
+      is_alive_mouse: false,
+      last_dis_eye_norse: 0,
+      last_dis_mouse: 0,
+      last_dm: 0,
+      last_dis_header: 0,
+      is_alive_header: false,
+
+      last_eye_x: 0,
+      last_eye_y: 0,
+      last_mouse_x: 0,
+      last_mouse_y: 0,
+
+      last_nose_left: 0,
+      last_nose_top: 0
     }
   },
   mounted() {
@@ -56,10 +48,11 @@ export default {
         {
           // 摄像头拍摄的区域
           video: {
-            width: 500,
-            height: 500,
+            width: 200,
+            height: 200,
             facingMode: 'user'
           } /* 前置优先 */
+          // video: true
         },
         this.success,
         this.error
@@ -68,51 +61,50 @@ export default {
 
     // 访问用户媒体设备
     getUserMedia(constrains, success, error) {
-      if (navigator.mediaDevices.getUserMedia) {
-        // 最新标准API
-        navigator.mediaDevices
-          .getUserMedia(constrains)
-          .then(success)
-          .catch(error)
-      } else if (navigator.webkitGetUserMedia) {
-        // webkit内核浏览器
-        navigator
-          .webkitGetUserMedia(constrains)
-          .then(success)
-          .catch(error)
-      } else if (navigator.mozGetUserMedia) {
-        // Firefox浏览器
-        navigator
-          .mozGetUserMedia(constrains)
-          .then(success)
-          .catch(error)
+      navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia
+      window.URL = window.URL || window.webkitURL || window.msURL || window.mozURL
+
+      if (navigator.mediaDevices) {
+        navigator.mediaDevices.getUserMedia(constrains).then(success).catch(error);
       } else if (navigator.getUserMedia) {
-        // 旧版API
-        navigator
-          .getUserMedia(constrains)
-          .then(success)
-          .catch(error)
+        navigator.getUserMedia(constrains, success, error);
       } else {
         this.scanTip = '你的浏览器不支持访问用户媒体设备'
       }
     },
 
     success(stream) {
-      this.streamIns = stream
       const video = document.getElementById('video')
-      // webkit内核浏览器
-      this.URL = window.URL || window.webkitURL
       if ('srcObject' in video) {
         video.srcObject = stream
       } else {
-        video.src = this.URL.createObjectURL(stream)
+        video.src = window.URL.createObjectURL(stream)
       }
 
       // 苹果手机的系统弹框会阻止js的线程的继续执行 手动0.1秒之后自动执行代码
-      setTimeout(() => {
+      // setTimeout(() => {
+      //   video.play()
+      //   this.initClmtrackr()
+      //   this.initTracker() // 人脸捕捉
+      // }, 100)
+
+      // eslint-disable-next-line no-undef
+      this.ctrack = new clm.tracker();
+      this.ctrack.init();
+
+      // document.addEventListener('clmtrackrIteration', function (event) {
+      //   console.log(event)
+      // }, false);
+
+      video.onloadedmetadata = () => {
         video.play()
-        this.initTracker() // 人脸捕捉
-      }, 100)
+      }
+
+      // video.oncanplay = () => {
+      //   this.initClmtrackr()
+      // }
+
+      this.initClmtrackr()
     },
 
     error() {
@@ -174,6 +166,99 @@ export default {
       })
     },
 
+    initClmtrackr() {
+      const video = document.getElementById('video')
+      video.play();
+      // start tracking
+      this.ctrack.start(video);
+      this.trackingStarted = true;
+      // start loop to draw face
+      this.drawLoop();
+    },
+
+    drawLoop() {
+      // const video = document.getElementById('video')
+      // var overlay = document.getElementById('refCanvas');
+      // var overlayCC = overlay.getContext('2d');
+      requestAnimationFrame(this.drawLoop);
+      // overlayCC.clearRect(0, 0, video.offsetWidth, video.offsetHeight);
+      //psrElement.innerHTML = "score :" + ctrack.getScore().toFixed(4);
+      const position = this.ctrack.getCurrentPosition()
+      if (position) {
+        this.status = true
+        this.title = '请保持头部不动'
+        // this.ctrack.draw(overlay);
+        if (position[0][0] > 145) {
+          this.scanTip = '请靠近摄像头'
+        } else {
+          if (!this.is_alive_mouse) {
+            this.alive_mouse()
+          } else {
+            this.validateMouse(position)
+          }
+
+        }
+        // console.log(position)
+      } else {
+        this.title = '请将头部对准摄像头'
+      }
+      // setTimeout(() => {
+      //   this.drawLoop()
+      // }, 200);
+    },
+
+    alive_mouse() {
+      //检测张嘴动作
+      this.scanTip = '请张合嘴巴'
+      this.is_mouse_ok = false;
+      this.last_dis_mouse = 0;
+      this.last_time = 0;
+      this.is_alive_mouse = true;
+      this.is_alive_header = false
+    },
+
+    validateMouse(positions) {
+      let { last_time, last_dis_eye_norse, last_dis_mouse, last_nose_left, last_nose_top, last_dm } = this
+
+      // 5秒内检测
+      if (last_time === 0 || +new Date() - last_time < 10000) {
+        //眼睛和鼻子距离
+        var xdiff = positions[62][0] - positions[27][0];
+        var ydiff = positions[62][1] - positions[27][1];
+        var dis_eye_norse = Math.pow((xdiff * xdiff + ydiff * ydiff), 0.5);
+
+        //上次的眼鼻距离和这次的眼鼻距离差
+        var dn = Math.abs(dis_eye_norse - last_dis_eye_norse);
+
+        //上嘴唇 和下嘴唇距离
+        var xdiff_mouse = positions[53][0] - positions[47][0];
+        var ydiff_mouse = positions[53][1] - positions[47][1];
+
+        var dis_mouse = Math.pow((xdiff_mouse * xdiff_mouse + ydiff_mouse * ydiff_mouse), 0.5);
+        var dm = Math.abs(dis_mouse - last_dis_mouse);
+
+        //鼻子的位置确保变化不大
+        if (!Math.floor(dn) && last_nose_left && last_nose_top && Math.abs(positions[62][0] - last_nose_left) < 10 &&
+          Math.abs(positions[62][1] - last_nose_top) < 10) {
+          console.log('上下嘴唇距离', dm - last_dm)
+
+          if (Math.floor(dm) && last_dm && (dm - last_dm) > 6) {
+            this.scanTip = '通过'
+          }
+          this.last_dis_mouse = dis_mouse;
+          this.last_dm = dm
+        } else {
+          this.title = '请保持头部不动'
+        }
+
+        this.last_time = new Date().getTime();
+        this.last_dis_eye_norse = dis_eye_norse;
+        this.last_dis_mouse = dis_mouse;
+        this.last_nose_left = positions[62][0];
+        this.last_nose_top = positions[62][1];
+      }
+    },
+
     // 拍照
     tackPhoto() {
       // 在画布上面绘制拍到的照片
@@ -181,8 +266,8 @@ export default {
         document.getElementById('video'),
         0,
         0,
-        this.vwidth,
-        this.vwidth
+        200,
+        200
       )
 
       // 保存为base64格式
@@ -241,20 +326,6 @@ export default {
       })
     },
 
-    // compare(url) {
-
-    //     let blob = this.getBlobBydataURI(url, 'image/png')
-
-    //     let formData = new FormData()
-
-    //     formData.append("file", blob, "file_" + Date.parse(new Date()) + ".png")
-
-    //     // TODO 得到文件后进行人脸识别
-
-    // },
-
-    // 保存为png,base64格式图片
-
     saveAsPNG(c) {
       return c.toDataURL('image/png', 0.4)
     },
@@ -279,69 +350,38 @@ export default {
       this.tracker = null
     },
 
-    faceToTengXun() {}
+    faceToTengXun() { }
   }
 }
 </script>
 
 <style lang="scss" scoped>
-.face-capture {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-
-  video {
-    border-radius: 50%;
-  }
-
-  video,
-  canvas {
-    width: 200px;
-    height: 200px;
-    position: fixed;
-    top: 117.5px;
-    object-fit: cover;
-    z-index: 2;
-    background-repeat: no-repeat;
-    background-size: 100% 100%;
-  }
-
-  .contentp {
-    position: fixed;
-    top: 438px;
-    font-size: 18px;
-    font-weight: 500;
-    color: #333333;
-  }
-
-  // .rect {
-  //   border: 2px solid #0aeb08;
-  //   position: fixed;
-  //   z-index: 4;
-  // }
-  .img-face {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    .imgurl {
-      position: fixed;
-      top: 117.5px;
-      width: 266px;
-      height: 266px;
-      border-radius: 133px;
-    }
-  }
+body {
+  background-color: #f0f0f0;
+  margin: 0px auto;
 }
 
-.tip {
-  position: fixed;
-  top: 48px;
-  z-index: 5;
-  font-size: 18px;
-  font-weight: 500;
-  color: #333333;
-  line-height: 25px;
+#refCanvas {
+  position: absolute;
+  top: 0px;
+  left: 0px;
+  right: 0;
+  margin: 0 auto;
+  transform: scaleX(-1);
+  filter: fliph;
+  border-radius: 50%;
+}
+
+#video {
+  transform: scaleX(-1);
+  filter: fliph;
+  border-radius: 50%;
+}
+
+#face-capture {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 </style>
