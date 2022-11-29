@@ -1,17 +1,17 @@
 <template>
-  <div id="app">
-    <button @click="initClmtrackr">按钮</button>
+  <div class="face-wrap">
     <p class="tip">{{ title }}</p>
     <div id="face-capture" class="face-capture">
-      <video id="video" width="200" height="200" preload="auto" loop playsinline autoplay>
+      <video id="video" width="150" height="150" preload="auto" loop playsinline autoplay>
       </video>
-      <canvas id="refCanvas" width="200" height="200"></canvas>
+      <canvas id="refCanvas" width="150" height="150"></canvas>
     </div>
     <p class="tip">{{ scanTip }}</p>
   </div>
 </template>
 
 <script>
+import { validateFace } from '@/api/index'
 export default {
   name: 'IndexPage',
   data() {
@@ -36,10 +36,15 @@ export default {
       last_mouse_y: 0,
 
       last_nose_left: 0,
-      last_nose_top: 0
+      last_nose_top: 0,
+
+      src: '',
+      validateTime: '',
+      receipt: ''
     }
   },
   mounted() {
+    this.receipt = this.$route.query.receipt
     this.playVideo()
   },
   methods: {
@@ -48,8 +53,8 @@ export default {
         {
           // 摄像头拍摄的区域
           video: {
-            width: 200,
-            height: 200,
+            width: 150,
+            height: 150,
             facingMode: 'user'
           } /* 前置优先 */
           // video: true
@@ -188,15 +193,12 @@ export default {
         this.status = true
         this.title = '请保持头部不动'
         // this.ctrack.draw(overlay);
-        if (position[0][0] > 145) {
-          this.scanTip = '请靠近摄像头'
-        } else {
+        if (!this.is_mouse_ok) {
           if (!this.is_alive_mouse) {
             this.alive_mouse()
           } else {
             this.validateMouse(position)
           }
-
         }
         // console.log(position)
       } else {
@@ -209,19 +211,21 @@ export default {
 
     alive_mouse() {
       //检测张嘴动作
-      this.scanTip = '请张合嘴巴'
       this.is_mouse_ok = false;
       this.last_dis_mouse = 0;
       this.last_time = 0;
       this.is_alive_mouse = true;
       this.is_alive_header = false
+      this.last_nose_left = 0
+      this.last_nose_top = 0
+      this.validateTime = +new Date()
     },
 
     validateMouse(positions) {
-      let { last_time, last_dis_eye_norse, last_dis_mouse, last_nose_left, last_nose_top, last_dm } = this
+      let { last_time, last_dis_eye_norse, last_dis_mouse, last_nose_left, last_nose_top, last_dm, validateTime } = this
 
-      // 5秒内检测
-      if (last_time === 0 || +new Date() - last_time < 10000) {
+      // 10秒内检测
+      if (last_time === 0 || last_time - validateTime < 10000) {
         //眼睛和鼻子距离
         var xdiff = positions[62][0] - positions[27][0];
         var ydiff = positions[62][1] - positions[27][1];
@@ -240,10 +244,17 @@ export default {
         //鼻子的位置确保变化不大
         if (!Math.floor(dn) && last_nose_left && last_nose_top && Math.abs(positions[62][0] - last_nose_left) < 10 &&
           Math.abs(positions[62][1] - last_nose_top) < 10) {
-          console.log('上下嘴唇距离', dm - last_dm)
+          // console.log('上下嘴唇距离', dm - last_dm)
+          this.scanTip = '请在10秒内，做出张合嘴巴的动作'
 
-          if (Math.floor(dm) && last_dm && (dm - last_dm) > 6) {
-            this.scanTip = '通过'
+          if (Math.floor(dm) && last_dm && (dm - last_dm) > 3) {
+            this.is_mouse_ok = true
+            this.scanTip = '检测成功，准备拍照'
+            setTimeout(() => {
+              this.scanTip = '拍照中...'
+              this.tackPhoto()
+              document.getElementById('video').pause()
+            }, 1500);
           }
           this.last_dis_mouse = dis_mouse;
           this.last_dm = dm
@@ -256,30 +267,33 @@ export default {
         this.last_dis_mouse = dis_mouse;
         this.last_nose_left = positions[62][0];
         this.last_nose_top = positions[62][1];
+      } else {
+        this.validateFail()
       }
     },
 
     // 拍照
     tackPhoto() {
+      const context = document.getElementById('refCanvas').getContext('2d')
       // 在画布上面绘制拍到的照片
-      this.context.drawImage(
+      context.drawImage(
         document.getElementById('video'),
         0,
         0,
-        200,
-        200
+        150,
+        150
       )
 
       // 保存为base64格式
-      this.imgUrl = this.saveAsPNG(document.getElementById('refCanvas'))
+      const src = this.saveAsPNG(document.getElementById('refCanvas'))
       /** 拿到base64格式图片之后就可以在this.compare方法中去调用后端接口比较了，也可以调用getBlobBydataURI方法转化成文件再去比较
        * 我们项目里有一个设置个人头像的地方，先保存一下用户的图片，然后去拿这个图片的地址和当前拍照图片给后端接口去比较。
        * */
 
       // this.compare(imgUrl)
       // 判断图片大小
-      this.imgSize()
-      this.faceToTengXun() // 人脸比对
+      // this.imgSize()
+      this.validateFace(src) // 人脸比对
       this.close()
     },
 
@@ -331,34 +345,59 @@ export default {
     },
 
     close() {
-      this.flag = false
-      this.tipFlag = false
-      this.showContainer = false
-      this.context = null
-      this.scanTip = '人脸识别中...'
+      // this.flag = false
+      // this.tipFlag = false
+      // this.showContainer = false
+      // this.context = null
+      // this.scanTip = '人脸识别中...'
 
-      clearTimeout(this.removePhotoID)
+      // clearTimeout(this.removePhotoID)
 
-      if (this.streamIns) {
-        this.streamIns.enabled = false
-        this.streamIns.getTracks()[0].stop()
-        this.streamIns.getVideoTracks()[0].stop()
-      }
+      // if (this.streamIns) {
+      //   this.streamIns.enabled = false
+      //   this.streamIns.getTracks()[0].stop()
+      //   this.streamIns.getVideoTracks()[0].stop()
+      // }
 
-      this.streamIns = null
-      this.trackertask.stop()
-      this.tracker = null
+      // this.streamIns = null
+      // this.trackertask.stop()
+      // this.tracker = null
     },
 
-    faceToTengXun() { }
+    async validateFace(src) {
+      const res = await validateFace({
+        faceCode: src,
+        receipt: this.receipt
+      })
+      if (res.success && res.status === 200) {
+        this.$router.push('/validateSuccess')
+        return
+      }
+
+      this.validateFail()
+    },
+
+    validateFail() {
+      this.$dialog({
+        message: '人脸识别失败，请再次按提示进行操作'
+      }).then(() => {
+        this.resetData()
+      });
+    },
+
+    resetData() {
+      cancelAnimationFrame(this.drawLoop)
+      this.alive_mouse()
+    },
   }
 }
 </script>
 
 <style lang="scss" scoped>
-body {
-  background-color: #f0f0f0;
-  margin: 0px auto;
+.face-wrap {
+  height: 100vh;
+  background: #fff;
+  padding: 20px;
 }
 
 #refCanvas {
@@ -378,7 +417,12 @@ body {
   border-radius: 50%;
 }
 
-#face-capture {
+.tip {
+  text-align: center;
+  padding: 10px 0;
+}
+
+.face-capture {
   position: relative;
   display: flex;
   justify-content: center;
