@@ -6,7 +6,8 @@ function resolve(dir) {
 }
 module.exports = defineConfig({
   transpileDependencies: true,
-    configureWebpack: (config) => {
+  publicPath: process.env.VUE_PUBLIC_PATH,
+  configureWebpack: (config) => {
     config.cache = {
       type: "filesystem",
       compression: "gzip",

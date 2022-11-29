@@ -13,6 +13,14 @@ const routes = [
       title: '人脸识别',
     },
   },
+  {
+    path: '/validateSuccess',
+    name: 'ValidateSuccess',
+    component: () => import('@/views/ValidateSuccess.vue'),
+    meta: {
+      title: '验证通过'
+    }
+  }
 ]
 
 const router = new VueRouter({
